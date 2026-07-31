@@ -346,8 +346,13 @@ namespace dxvk {
     enabledFeatures.vk13.synchronization2 = VK_TRUE;
     enabledFeatures.vk13.dynamicRendering = VK_TRUE;
 
-    // Maintenance4 may cause performance problems on amdvlk in some cases
-    if (m_deviceInfo.vk12.driverID != VK_DRIVER_ID_AMD_OPEN_SOURCE
+    // Maintenance4 may cause performance problems on amdvlk in some cases.
+    // macOS/MoltenVK patch: only request it when actually supported — MoltenVK
+    // exposes Vulkan 1.3 but not maintenance4, and DXVK force-enabling it made
+    // vkCreateDevice fail (VK_ERROR_FEATURE_NOT_PRESENT). The backend already
+    // guards maintenance4 usage (dxvk_memory.cpp) so the fallback path is safe.
+    if (m_deviceFeatures.vk13.maintenance4
+     && m_deviceInfo.vk12.driverID != VK_DRIVER_ID_AMD_OPEN_SOURCE
      && m_deviceInfo.vk12.driverID != VK_DRIVER_ID_AMD_PROPRIETARY)
       enabledFeatures.vk13.maintenance4 = VK_TRUE;
 
@@ -389,10 +394,16 @@ namespace dxvk {
 
     // Require robustBufferAccess2 since we use the robustness alignment
     // info in a number of places, and require null descriptor support
-    // since we no longer have a fallback for those in the backend
-    enabledFeatures.extRobustness2.robustBufferAccess2 = VK_TRUE;
+    // since we no longer have a fallback for those in the backend.
+    // macOS/MoltenVK patch: MoltenVK reports neither robustBufferAccess2 nor
+    // nullDescriptor on Apple Silicon, so force-enabling them fails device
+    // creation (-8). Gate on support to let the device come up — EXPERIMENTAL:
+    // DXVK 2.x dropped the backend fallback, so this may cause issues if those
+    // paths are exercised. Testing empirically whether a simple D3D9 engine hits
+    // them at all.
+    enabledFeatures.extRobustness2.robustBufferAccess2 = m_deviceFeatures.extRobustness2.robustBufferAccess2;
     enabledFeatures.extRobustness2.robustImageAccess2 = m_deviceFeatures.extRobustness2.robustImageAccess2;
-    enabledFeatures.extRobustness2.nullDescriptor = VK_TRUE;
+    enabledFeatures.extRobustness2.nullDescriptor = m_deviceFeatures.extRobustness2.nullDescriptor;
 
     // We use this to avoid decompressing SPIR-V shaders in some situations
     enabledFeatures.extShaderModuleIdentifier.shaderModuleIdentifier =
@@ -439,6 +450,31 @@ namespace dxvk {
     Logger::info("Enabled device extensions:");
     this->logNameList(extensionNameList);
     this->logFeatures(enabledFeatures);
+
+    // [macOS diag] Name any feature enabled-but-unsupported (cause of -8).
+    {
+      auto walk = [](const char* tag, const void* en, const void* sup, size_t bytes, size_t startOff) {
+        auto e = reinterpret_cast<const VkBool32*>(reinterpret_cast<const char*>(en) + startOff);
+        auto s = reinterpret_cast<const VkBool32*>(reinterpret_cast<const char*>(sup) + startOff);
+        size_t n = (bytes - startOff) / sizeof(VkBool32);
+        for (size_t i = 0; i < n; i++)
+          if (e[i] && !s[i])
+            Logger::err(str::format("DIAG ", tag, " feature idx ", i, " enabled but UNSUPPORTED"));
+      };
+      walk("core", &enabledFeatures.core.features, &m_deviceFeatures.core.features, sizeof(VkPhysicalDeviceFeatures), 0);
+      walk("vk11", &enabledFeatures.vk11, &m_deviceFeatures.vk11, sizeof(enabledFeatures.vk11), 8);
+      walk("vk12", &enabledFeatures.vk12, &m_deviceFeatures.vk12, sizeof(enabledFeatures.vk12), 8);
+      walk("vk13", &enabledFeatures.vk13, &m_deviceFeatures.vk13, sizeof(enabledFeatures.vk13), 8);
+      #define WALK_EXT(m) walk(#m, &enabledFeatures.m, &m_deviceFeatures.m, sizeof(enabledFeatures.m), 8)
+      WALK_EXT(extAttachmentFeedbackLoopLayout); WALK_EXT(extCustomBorderColor); WALK_EXT(extDepthClipEnable);
+      WALK_EXT(extDepthBiasControl); WALK_EXT(extExtendedDynamicState3); WALK_EXT(extFragmentShaderInterlock);
+      WALK_EXT(extGraphicsPipelineLibrary); WALK_EXT(extLineRasterization); WALK_EXT(extMemoryPriority);
+      WALK_EXT(extNonSeamlessCubeMap); WALK_EXT(extRobustness2); WALK_EXT(extShaderModuleIdentifier);
+      WALK_EXT(extSwapchainMaintenance1); WALK_EXT(extTransformFeedback); WALK_EXT(extVertexAttributeDivisor);
+      WALK_EXT(khrMaintenance5); WALK_EXT(khrPresentId); WALK_EXT(khrPresentWait);
+      WALK_EXT(nvDescriptorPoolOverallocation); WALK_EXT(nvRawAccessChains);
+      #undef WALK_EXT
+    }
 
     // Report the desired overallocation behaviour to the driver
     VkDeviceMemoryOverallocationCreateInfoAMD overallocInfo = { VK_STRUCTURE_TYPE_DEVICE_MEMORY_OVERALLOCATION_CREATE_INFO_AMD };
@@ -498,8 +534,10 @@ namespace dxvk {
       vr = m_vki->vkCreateDevice(m_handle, &info, nullptr, &device);
     }
 
-    if (vr != VK_SUCCESS)
+    if (vr != VK_SUCCESS) {
+      Logger::err(str::format("DxvkAdapter: vkCreateDevice failed: VkResult = ", int32_t(vr)));
       throw DxvkError("DxvkAdapter: Failed to create device");
+    }
     
     Rc<vk::DeviceFn> vkd = new vk::DeviceFn(m_vki, true, device);
 

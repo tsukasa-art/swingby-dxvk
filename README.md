@@ -1,3 +1,9 @@
+> **This is an altered fork of DXVK** (upstream: https://github.com/doitsujin/dxvk),
+> not the original software. It vendors release 2.4.1 plus one local patch.
+> See [`SWINGBY_DXVK_PATCH.md`](SWINGBY_DXVK_PATCH.md) for what changed, why,
+> and how it was verified. This notice is required by the zlib/libpng license
+> in `LICENSE`; everything below this point is the unmodified upstream README.
+
 # DXVK
 
 A Vulkan-based translation layer for Direct3D 8/9/10/11 which allows running 3D applications on Linux using Wine.

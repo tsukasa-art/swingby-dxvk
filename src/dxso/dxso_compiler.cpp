@@ -750,29 +750,34 @@ namespace dxvk {
       DxsoBindingType::Image,
       idx);
 
-    const bool implicit = m_programInfo.majorVersion() < 2 || m_moduleInfo.options.forceSamplerTypeSpecConstants;
+    const bool sm1Implicit = m_programInfo.majorVersion() < 2;
+    const bool implicit = sm1Implicit || m_moduleInfo.options.forceSamplerTypeSpecConstants;
 
     if (!implicit) {
       DxsoSamplerType samplerType = 
         SamplerTypeFromTextureType(type);
 
       DclSampler(idx, binding, samplerType, false, implicit);
-
-      if (samplerType != SamplerTypeTexture3D) {
-        // We could also be depth compared!
-        DclSampler(idx, binding, samplerType, true, implicit);
-      }
     }
     else {
-      // Could be any of these!
-      // We will check with the spec constant at sample time.
-      for (uint32_t i = 0; i < SamplerTypeCount; i++) {
-        auto samplerType = static_cast<DxsoSamplerType>(i);
+      if (sm1Implicit) {
+        // macOS/MoltenVK VN-targeted patch: SM1 shaders in 2D VN engines only
+        // need a 2D color sampler. Emitting all aliasing variants on one binding
+        // trips Metal's unique resource-index rules.
+        DclSampler(idx, binding, SamplerTypeTexture2D, false, implicit);
+        m_samplers[idx].depth[SamplerTypeTexture2D] = m_samplers[idx].color[SamplerTypeTexture2D];
+      }
+      else {
+        // Could be any of these!
+        // We will check with the spec constant at sample time.
+        for (uint32_t i = 0; i < SamplerTypeCount; i++) {
+          auto samplerType = static_cast<DxsoSamplerType>(i);
 
-        DclSampler(idx, binding, samplerType, false, implicit);
+          DclSampler(idx, binding, samplerType, false, implicit);
 
-        if (samplerType != SamplerTypeTexture3D)
-          DclSampler(idx, binding, samplerType, true, implicit);
+          if (samplerType != SamplerTypeTexture3D)
+            DclSampler(idx, binding, samplerType, true, implicit);
+        }
       }
     }
 
@@ -781,7 +786,7 @@ namespace dxvk {
     // Store descriptor info for the shader interface
     DxvkBindingInfo bindingInfo = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER };
     bindingInfo.resourceBinding = binding;
-    bindingInfo.viewType        = implicit ? VK_IMAGE_VIEW_TYPE_MAX_ENUM : viewType;
+    bindingInfo.viewType        = sm1Implicit ? VK_IMAGE_VIEW_TYPE_2D : (implicit ? VK_IMAGE_VIEW_TYPE_MAX_ENUM : viewType);
     bindingInfo.access          = VK_ACCESS_SHADER_READ_BIT;
     m_bindings.push_back(bindingInfo);
   }
@@ -2975,6 +2980,18 @@ void DxsoCompiler::emitControlFlowGenericLoop(
       this->emitDstStore(dst, result, ctx.dst.mask, ctx.dst.saturate, emitPredicateLoad(ctx), ctx.dst.shift, ctx.dst.id);
     };
 
+    if (m_programInfo.majorVersion() < 2) {
+      uint32_t bitOffset = m_programInfo.type() == DxsoProgramTypes::VertexShader
+        ? samplerIdx + caps::MaxTexturesPS + 1
+        : samplerIdx;
+
+      uint32_t isNull = m_spec.get(m_module, m_specUbo, SpecSamplerNull, bitOffset, 1);
+      isNull = m_module.opINotEqual(m_module.defBoolType(), isNull, m_module.constu32(0));
+
+      SampleImage(texcoordVar, sampler.color[SamplerTypeTexture2D], false, SamplerTypeTexture2D, isNull);
+      return;
+    }
+
     auto SampleType = [&](DxsoSamplerType samplerType) {
       uint32_t bitOffset = m_programInfo.type() == DxsoProgramTypes::VertexShader
         ? samplerIdx + caps::MaxTexturesPS + 1
@@ -2983,32 +3000,10 @@ void DxsoCompiler::emitControlFlowGenericLoop(
       uint32_t isNull = m_spec.get(m_module, m_specUbo, SpecSamplerNull, bitOffset, 1);
       isNull = m_module.opINotEqual(m_module.defBoolType(), isNull, m_module.constu32(0));
 
-      // Only do the check for depth comp. samplers
-      // if we aren't a 3D texture
-      if (samplerType != SamplerTypeTexture3D) {
-        uint32_t colorLabel  = m_module.allocateId();
-        uint32_t depthLabel  = m_module.allocateId();
-        uint32_t endLabel    = m_module.allocateId();
-
-        uint32_t isDepth = m_spec.get(m_module, m_specUbo, SpecSamplerDepthMode, bitOffset, 1);
-        isDepth = m_module.opINotEqual(m_module.defBoolType(), isDepth, m_module.constu32(0));
-
-        m_module.opSelectionMerge(endLabel, spv::SelectionControlMaskNone);
-        m_module.opBranchConditional(isDepth, depthLabel, colorLabel);
-
-        m_module.opLabel(colorLabel);
-        SampleImage(texcoordVar, sampler.color[samplerType], false, samplerType, isNull);
-        m_module.opBranch(endLabel);
-
-        m_module.opLabel(depthLabel);
-        // No spec constant as if we are unbound we always fall down the color path.
-        SampleImage(texcoordVar, sampler.depth[samplerType], true, samplerType, 0);
-        m_module.opBranch(endLabel);
-
-        m_module.opLabel(endLabel);
-      }
-      else
-        SampleImage(texcoordVar, sampler.color[samplerType], false, samplerType, isNull);
+      // MoltenVK compatibility: some ps_2_0 shaders only use plain texld from
+      // dcl_2d samplers. Do not emit DXVK's defensive Dref variant, which
+      // aliases the same binding and breaks Metal codegen.
+      SampleImage(texcoordVar, sampler.color[samplerType], false, samplerType, isNull);
     };
 
     if (m_programInfo.majorVersion() >= 2 && !m_moduleInfo.options.forceSamplerTypeSpecConstants) {

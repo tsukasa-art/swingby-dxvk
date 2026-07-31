@@ -497,6 +497,15 @@ namespace dxvk {
       rsInfo.depthClampEnable = !state.rs.depthClipEnable();
     }
 
+    static bool s_depthClampLogged = false;
+    if (!s_depthClampLogged
+     && !device->features().extDepthClipEnable.depthClipEnable
+     && !state.rs.depthClipEnable()
+     && rsInfo.depthClampEnable) {
+      s_depthClampLogged = true;
+      Logger::info("DXVK_DEPTHCLAMP pipeline depthClipFeature=0 depthClipEnable=0 depthClampEnable=1");
+    }
+
     // Set up conservative rasterization if requested by the application.
     if (state.rs.conservativeMode() != VK_CONSERVATIVE_RASTERIZATION_MODE_DISABLED_EXT) {
       rsConservativeInfo.pNext = std::exchange(rsInfo.pNext, &rsConservativeInfo);

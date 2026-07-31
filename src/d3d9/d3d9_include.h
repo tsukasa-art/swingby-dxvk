@@ -49,11 +49,17 @@
 #endif
 
 // MinGW headers are broken. Who'dve guessed?
+// macOS build note: mingw-w64 14.x now defines _D3DDEVINFO_RESOURCEMANAGER in
+// d3d9types.h, so DXVK's dummy below conflicts. Newer mingw provides the real
+// struct — drop the dummy. (Re-add under a version guard if building on an old
+// mingw that lacks it.)
+#if 0
 #ifndef _MSC_VER
 typedef struct _D3DDEVINFO_RESOURCEMANAGER
 {
   char dummy;
 } D3DDEVINFO_RESOURCEMANAGER, * LPD3DDEVINFO_RESOURCEMANAGER;
+#endif
 #endif
 
 // This is the managed pool on D3D9Ex, it's just hidden!

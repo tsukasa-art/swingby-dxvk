@@ -1083,6 +1083,11 @@ namespace dxvk {
 
     D3D9BufferSlice AllocUPBuffer(VkDeviceSize size);
 
+    // MoltenVK null-stream fix: lazily create/grow + return a constant-zero
+    // slice (>= size bytes) to bind to NullStreamIdx on UP draws, with the same
+    // (non-zero) stride as binding 0. See m_mvkNullStreamVbo.
+    DxvkBufferSlice GetMvkNullStreamSlice(VkDeviceSize size);
+
     D3D9BufferSlice AllocStagingBuffer(VkDeviceSize size);
 
     void EmitStagingBufferMarker();
@@ -1324,6 +1329,7 @@ namespace dxvk {
     D3D9ConstantBuffer              m_psShared;
     D3D9ConstantBuffer              m_specBuffer;
 
+    Rc<DxvkBuffer>                  m_mvkNullStreamVbo;  // MoltenVK null-stream fix (constant-zero, see GetMvkNullStreamSlice)
     Rc<DxvkBuffer>                  m_upBuffer;
     VkDeviceSize                    m_upBufferOffset  = 0ull;
     void*                           m_upBufferMapPtr  = nullptr;

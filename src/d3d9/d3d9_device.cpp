@@ -2805,6 +2805,7 @@ namespace dxvk {
 
     EmitCs([this,
       cBufferSlice  = std::move(upSlice.slice),
+      cNullSlice    = GetMvkNullStreamSlice(bufferSize),
       cPrimType     = PrimitiveType,
       cStride       = VertexStreamZeroStride,
       cVertexCount  = vertexCount
@@ -2814,10 +2815,18 @@ namespace dxvk {
       // Tests on Windows show that D3D9 does not do non-indexed instanced draws.
 
       ctx->bindVertexBuffer(0, std::move(cBufferSlice), cStride);
+      // MoltenVK null-stream fix: the FF VS routes attributes absent from the
+      // active vertex declaration to the null-stream binding (NullStreamIdx).
+      // The UP path otherwise leaves it unbound, which corrupts MoltenVK's whole
+      // vertex fetch (incl. position) -> black. Bind a constant-zero buffer (same
+      // stride as binding 0; Metal rejects stride 0 for per-vertex) so the absent
+      // attributes read zero instead of garbage.
+      ctx->bindVertexBuffer(D3D9DeviceEx::NullStreamIdx, DxvkBufferSlice(cNullSlice), cStride);
       ctx->draw(
         cVertexCount, 1,
         0, 0);
       ctx->bindVertexBuffer(0, DxvkBufferSlice(), 0);
+      ctx->bindVertexBuffer(D3D9DeviceEx::NullStreamIdx, DxvkBufferSlice(), 0);
     });
 
     m_state.vertexBuffers[0].vertexBuffer = nullptr;
@@ -2865,6 +2874,7 @@ namespace dxvk {
     EmitCs([this,
       cVertexSize   = vertexBufferSize,
       cBufferSlice  = std::move(upSlice.slice),
+      cNullSlice    = GetMvkNullStreamSlice(vertexBufferSize),
       cPrimType     = PrimitiveType,
       cPrimCount    = PrimitiveCount,
       cStride       = VertexStreamZeroStride,
@@ -2877,12 +2887,18 @@ namespace dxvk {
       ApplyPrimitiveType(ctx, cPrimType);
 
       ctx->bindVertexBuffer(0, cBufferSlice.subSlice(0, cVertexSize), cStride);
+      // MoltenVK null-stream fix (see DrawPrimitiveUP): bind a constant-zero
+      // buffer (same stride as binding 0) to the null-stream binding so the FF
+      // VS's absent attributes read zero instead of garbage, keeping the fetch
+      // valid (avoids both black from unbound and white from garbage).
+      ctx->bindVertexBuffer(D3D9DeviceEx::NullStreamIdx, DxvkBufferSlice(cNullSlice), cStride);
       ctx->bindIndexBuffer(cBufferSlice.subSlice(cVertexSize, cBufferSlice.length() - cVertexSize), cIndexType);
       ctx->drawIndexed(
         drawInfo.vertexCount, drawInfo.instanceCount,
         0,
         0, 0);
       ctx->bindVertexBuffer(0, DxvkBufferSlice(), 0);
+      ctx->bindVertexBuffer(D3D9DeviceEx::NullStreamIdx, DxvkBufferSlice(), 0);
       ctx->bindIndexBuffer(DxvkBufferSlice(), VK_INDEX_TYPE_UINT32);
     });
 
@@ -4272,8 +4288,13 @@ namespace dxvk {
     DxvkDeviceFeatures supported = adapter->features();
     DxvkDeviceFeatures enabled = {};
 
-    // Geometry shaders are used for some meta ops
-    enabled.core.features.geometryShader = VK_TRUE;
+    // Geometry shaders are used for some meta ops (SWVP stream-out emulation).
+    // macOS/MoltenVK patch: Apple Silicon Metal has no geometry shaders, so
+    // MoltenVK reports geometryShader unsupported and force-enabling it makes
+    // vkCreateDevice fail (-8). Gate on support; HWVP titles (incl. 2D VN
+    // engines like artemis) never build a GS pipeline so this is safe. SWVP
+    // titles would lose stream-out emulation, but those can't run on Metal anyway.
+    enabled.core.features.geometryShader = supported.core.features.geometryShader;
     enabled.core.features.robustBufferAccess = VK_TRUE;
 
     enabled.vk12.samplerMirrorClampToEdge = VK_TRUE;
@@ -4300,7 +4321,9 @@ namespace dxvk {
     enabled.core.features.sampleRateShading = VK_TRUE;
     enabled.core.features.samplerAnisotropy = supported.core.features.samplerAnisotropy;
     enabled.core.features.shaderClipDistance = VK_TRUE;
-    enabled.core.features.shaderCullDistance = VK_TRUE;
+    // macOS/MoltenVK patch: Metal/Apple Silicon lacks shaderCullDistance; gate on
+    // support (clip distance covers the common cases) to allow device creation.
+    enabled.core.features.shaderCullDistance = supported.core.features.shaderCullDistance;
 
     // Ensure we support real BC formats and unofficial vendor ones.
     enabled.core.features.textureCompressionBC = VK_TRUE;
@@ -4405,6 +4428,33 @@ namespace dxvk {
 
     m_upBufferOffset += alignedSize;
     return result;
+  }
+
+
+  DxvkBufferSlice D3D9DeviceEx::GetMvkNullStreamSlice(VkDeviceSize size) {
+    // MoltenVK null-stream fix: a persistent zero-filled buffer, grown as needed
+    // to cover the draw's vertex range. Bound to NullStreamIdx with the SAME
+    // (non-zero) stride as binding 0 so the FF VS attributes absent from the
+    // active vertex declaration read zero. (Metal rejects stride 0 for
+    // per-vertex buffers, so we must use a real stride and a buffer this big.)
+    if (unlikely(m_mvkNullStreamVbo == nullptr || m_mvkNullStreamVbo->info().size < size)) {
+      VkDeviceSize allocSize = std::max<VkDeviceSize>(size, 64u << 10);
+
+      DxvkBufferCreateInfo info;
+      info.size   = allocSize;
+      info.usage  = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+      info.access = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+      info.stages = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+
+      m_mvkNullStreamVbo = m_dxvkDevice->createBuffer(info,
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+        | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+      std::memset(m_mvkNullStreamVbo->mapPtr(0), 0, allocSize);
+    }
+
+    return DxvkBufferSlice(m_mvkNullStreamVbo, 0, size);
   }
 
 
@@ -6536,7 +6586,17 @@ namespace dxvk {
     DxvkRasterizerState state = { };
     state.cullMode        = DecodeCullMode(D3DCULL(rs[D3DRS_CULLMODE]));
     state.depthBiasEnable = IsDepthBiasEnabled();
-    state.depthClipEnable = true;
+    // MoltenVK compatibility: D3D9-style 2D rendering expects Z outside the
+    // canonical clip volume to be clamped rather than discarded.
+    static bool s_depthClampLogged = false;
+    if (!s_depthClampLogged) {
+      s_depthClampLogged = true;
+      Logger::info("DXVK_DEPTHCLAMP D3D9 rasterizer depthClipEnable=0; DXVK will use depthClampEnable when depth-clip control is unavailable.");
+    }
+
+    // MoltenVK reports no depthClipEnable support, so setting this to false
+    // makes DXVK's pipeline code use core depthClamp instead.
+    state.depthClipEnable = false;
     state.frontFace       = VK_FRONT_FACE_CLOCKWISE;
     state.polygonMode     = DecodeFillMode(D3DFILLMODE(rs[D3DRS_FILLMODE]));
     state.flatShading     = m_state.renderStates[D3DRS_SHADEMODE] == D3DSHADE_FLAT;
