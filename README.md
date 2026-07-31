@@ -3,6 +3,8 @@
 > See [`SWINGBY_DXVK_PATCH.md`](SWINGBY_DXVK_PATCH.md) for what changed, why,
 > and how it was verified. This notice is required by the zlib/libpng license
 > in `LICENSE`; everything below this point is the unmodified upstream README.
+>
+> [日本語](README.ja.md)
 
 # DXVK
 
