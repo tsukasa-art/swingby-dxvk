@@ -1,4 +1,5 @@
-> **This is an altered fork of DXVK** (upstream: https://github.com/doitsujin/dxvk),
+> **Swingby DXVK** (`swingby-dxvk`) is an altered fork of DXVK
+> (upstream: https://github.com/doitsujin/dxvk),
 > not the original software. It vendors release 2.4.1 plus one local patch.
 > See [`SWINGBY_DXVK_PATCH.md`](SWINGBY_DXVK_PATCH.md) for what changed, why,
 > and how it was verified. This notice is required by the zlib/libpng license

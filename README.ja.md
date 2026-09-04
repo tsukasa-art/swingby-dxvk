@@ -1,8 +1,8 @@
-# swingby-dxvk
+# Swingby DXVK（`swingby-dxvk`）
 
 [English](README.md)
 
-**swingby-dxvk**は、Orreryの非公開ランチャー本体**Melammu**で利用する、
+**Swingby DXVK**（repository: `swingby-dxvk`）は、Orreryの非公開ランチャー本体**Melammu**で利用する、
 [DXVK](https://github.com/doitsujin/dxvk) 2.4.1をbaseとした改変forkです。
 DirectXをVulkan経由でMetalへ変換するDXVKに、MoltenVK / Apple Silicon向けの
 互換性修正を加えています。
@@ -11,7 +11,7 @@ DirectXをVulkan経由でMetalへ変換するDXVKに、MoltenVK / Apple Silicon�
 （[LICENSE](LICENSE)参照）が定める「改変版はそれと分かるよう明記する」
 という条件に従い、この文書と[README.md](README.md)冒頭の notice がその明記です。
 
-swingby-wineのようにupstreamを継続追従するforkとは異なり、このrepoは
+Swingby Wineのようにupstreamを継続追従するforkとは異なり、このrepoは
 特定のpatch一式を再現可能な状態でgit管理下に置くために作りました。以前は
 patch済みsourceが非git作業ツリーにしか存在せず、単一障害点になっていました。
 
@@ -38,8 +38,8 @@ driverでの検証はしておらず、upstream DXVKへのPRは検討事項と�
 | 対象 | 役割 |
 |---|---|
 | **Melammu** | Orreryで実際に開発・利用する非公開のmacOSランチャー本体 |
-| **[swingby-wine](https://github.com/tsukasa-art/swingby-wine)** | Melammuが利用する公開Wine source fork |
-| **swingby-dxvk** | Melammuが利用する公開DXVK source fork（このrepo） |
+| **[Swingby Wine](https://github.com/tsukasa-art/swingby-wine)** | Melammuが利用する公開Wine source fork |
+| **Swingby DXVK** | Melammuが利用する公開DXVK source fork（このrepo） |
 | **[melammu-vn](https://github.com/tsukasa-art/melammu-vn)** | SwiftUI UIと汎用判定を切り出したsource-only公開参照実装 |
 
 ## Build
@@ -58,7 +58,7 @@ link timestamp系フィールドであることを実測確認しています（
 ## 関連リンク
 
 - [Orrery — プロジェクト概要](https://tsukasa-art.com/projects/orrery/)
-- [swingby-wine](https://github.com/tsukasa-art/swingby-wine) — Melammuが利用する公開Wine fork
+- [Swingby Wine](https://github.com/tsukasa-art/swingby-wine) — Melammuが利用する公開Wine fork
 - [melammu-vn — source-only公開参照実装](https://github.com/tsukasa-art/melammu-vn)
 
 ## License
