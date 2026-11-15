@@ -7,6 +7,9 @@
 >
 > [日本語](README.ja.md)
 
+Orrery combines the **KASANE** macOS launcher (development name: Melammu) with the **Swingby** Windows-game
+compatibility layer. Swingby consists of Swingby Wine and Swingby DXVK.
+
 # DXVK
 
 A Vulkan-based translation layer for Direct3D 8/9/10/11 which allows running 3D applications on Linux using Wine.

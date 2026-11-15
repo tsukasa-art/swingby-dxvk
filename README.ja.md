@@ -6,6 +6,8 @@
 [DXVK](https://github.com/doitsujin/dxvk) 2.4.1をbaseとした改変forkです。
 DirectXをVulkan経由でMetalへ変換するDXVKに、MoltenVK / Apple Silicon向けの
 互換性修正を加えています。
+OrreryはmacOSランチャーのKASANE（開発名 Melammu）とWindowsゲーム互換レイヤー**Swingby**を組み合わせた互換・管理基盤で、
+SwingbyはSwingby WineとSwingby DXVKから構成されます。
 
 **これはDXVK本家そのものではなく改変版です。** zlib/libpngライセンス
 （[LICENSE](LICENSE)参照）が定める「改変版はそれと分かるよう明記する」
